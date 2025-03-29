@@ -10,6 +10,7 @@ from src.config import LOG_ERROR, SECURITY_MONITOR_QUEUE_NAME,\
     LOG_DEBUG, LOG_INFO
 from src.queues_dir import QueuesDirectory
 from src.event_types import Event, ControlEvent
+from src.crypto_module import verify_signature
 
 
 class BaseSecurityMonitor(Process):
@@ -19,11 +20,12 @@ class BaseSecurityMonitor(Process):
     events_q_name = event_source_name
     log_level = DEFAULT_LOG_LEVEL
 
-    def __init__(self, queues_dir: QueuesDirectory):
+    def __init__(self, queues_dir: QueuesDirectory, public_key: str):
         # вызываем конструктор базового класса
         super().__init__()
 
         self._queues_dir = queues_dir
+        self.public_key = public_key
 
         # создаём очередь для сообщений на обработку
         self._events_q = Queue()
@@ -91,6 +93,25 @@ class BaseSecurityMonitor(Process):
     @abstractmethod
     def _check_event(self, event: Event):
         """ проверка события на допустимость политиками безопасности """
+        # Подтверждаем подпись
+        if not hasattr(event, 'signature'):
+            self._log_message(LOG_ERROR, f"Событие {event} не имеет подписи")
+            return False
+            
+        # Сохраняем информацию для регистрации
+        signed_data = (
+            event.source,
+            event.destination,
+            event.operation,
+            event.parameters
+        )
+        
+        if not verify_signature(signed_data, event.signature, self.public_key):
+            self._log_message(LOG_ERROR, f"Неверная подпись для события {event}")
+            return False
+            
+        # Если подпись верная, продалжаем остальные проверки
+        return True
 
     def _proceed(self, event: Event):
         """ отправить проверенное событие конечному получателю """
