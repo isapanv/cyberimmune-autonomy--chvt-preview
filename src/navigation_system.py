@@ -97,7 +97,7 @@ class BaseNavigationSystem(Process):
             self._log_message(LOG_ERROR, f"ошибка получения координат: {e}")
 
     @abstractmethod
-    def _send_position_to_consumers(self):
+    def _send_position_to_consumers(self,):
         pass
 
     def run(self):

@@ -120,15 +120,21 @@ class SITL(Process):
             pass
 
     def _post_telemetry(self):
-        event = Event(source=SITL.event_source_name,
-                      destination=SITL_TELEMETRY_QUEUE_NAME,
-                      operation="post_telemetry",
-                      parameters=self._position,
-                      extra_parameters={
-                          "bearing": self._bearing, "speed": self._speed_kmph}
-                      )
-        telemetry_gateway_q = self._queues_dir.get_queue(
-            SITL_TELEMETRY_QUEUE_NAME)
+        if not self._position:
+            self._log_message(LOG_ERROR, "No position data available")
+            return
+        try:
+            event = Event(source=SITL.event_source_name,
+                        destination=SITL_TELEMETRY_QUEUE_NAME,
+                        operation="post_telemetry",
+                        parameters=self._position,
+                        extra_parameters={
+                            "bearing": self._bearing, "speed": self._speed_kmph}
+                        )
+            telemetry_gateway_q = self._queues_dir.get_queue(
+                SITL_TELEMETRY_QUEUE_NAME)
+        except Exception as e:
+            self._log_message(LOG_ERROR, f"Telemetry error: {str(e)}")
         try:
             telemetry_gateway_q.put(event)
         except Exception as e:

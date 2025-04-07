@@ -2,7 +2,7 @@
 from multiprocessing import Queue
 from typing import Union
 
-from config import CRITICALITY_STR, DEFAULT_LOG_LEVEL, LOG_ERROR, LOG_INFO
+from src.config import CRITICALITY_STR, DEFAULT_LOG_LEVEL, LOG_ERROR, LOG_INFO
 
 
 class QueuesDirectory:

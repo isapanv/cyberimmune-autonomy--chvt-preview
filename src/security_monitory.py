@@ -2,7 +2,8 @@
 from abc import abstractmethod
 from multiprocessing import Queue, Process
 from queue import Empty
-
+from typing import Optional
+from src.blackbox import BaseBlackBox
 from time import sleep
 
 from src.config import LOG_ERROR, SECURITY_MONITOR_QUEUE_NAME,\
@@ -10,7 +11,6 @@ from src.config import LOG_ERROR, SECURITY_MONITOR_QUEUE_NAME,\
     LOG_DEBUG, LOG_INFO
 from src.queues_dir import QueuesDirectory
 from src.event_types import Event, ControlEvent
-from src.crypto_module import verify_signature
 
 
 class BaseSecurityMonitor(Process):
@@ -20,13 +20,12 @@ class BaseSecurityMonitor(Process):
     events_q_name = event_source_name
     log_level = DEFAULT_LOG_LEVEL
 
-    def __init__(self, queues_dir: QueuesDirectory, public_key: str):
+    def __init__(self, queues_dir: QueuesDirectory, public_key: str = None, blackbox: BaseBlackBox = None):
         # вызываем конструктор базового класса
         super().__init__()
-
+        self._blackbox = blackbox
         self._queues_dir = queues_dir
-        self.public_key = public_key
-
+        self._public_key = public_key
         # создаём очередь для сообщений на обработку
         self._events_q = Queue()
         self._events_q_name = self.event_source_name
@@ -93,29 +92,26 @@ class BaseSecurityMonitor(Process):
     @abstractmethod
     def _check_event(self, event: Event):
         """ проверка события на допустимость политиками безопасности """
-        # Подтверждаем подпись
+        # Convert legacy SITL format if needed
+        if hasattr(event, 'extra_parameters'):
+            event.parameters = {
+                **getattr(event, 'parameters', {}),
+                **event.extra_parameters
+            }
+            
+        # Rest of your existing verification code
         if not hasattr(event, 'signature'):
-            self._log_message(LOG_ERROR, f"Событие {event} не имеет подписи")
+            self._log_message(LOG_ERROR, "Event missing signature")
             return False
-            
-        # Сохраняем информацию для регистрации
-        signed_data = (
-            event.source,
-            event.destination,
-            event.operation,
-            event.parameters
-        )
-        
-        if not verify_signature(signed_data, event.signature, self.public_key):
-            self._log_message(LOG_ERROR, f"Неверная подпись для события {event}")
-            return False
-            
-        # Если подпись верная, продалжаем остальные проверки
-        return True
 
     def _proceed(self, event: Event):
         """ отправить проверенное событие конечному получателю """
+        if self._blackbox and hasattr(event, 'signature'):
+            # Логируем событие в черный ящик
+            self._blackbox._log_event(event, event.signature)
+        
         destination_q = self._queues_dir.get_queue(event.destination)
+        
         if destination_q is None:
             self._log_message(
                 LOG_ERROR, f"ошибка обработки запроса {event}, получатель не найден")

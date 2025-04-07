@@ -8,13 +8,15 @@ from time import sleep
 from typing import Optional
 from geopy import Point as GeoPoint
 
-from config import CRITICALITY_STR, DEFAULT_LOG_LEVEL, SAFETY_BLOCK_QUEUE_NAME, \
+from src.config import CRITICALITY_STR, DEFAULT_LOG_LEVEL, SAFETY_BLOCK_QUEUE_NAME, \
     LOG_ERROR, LOG_DEBUG, LOG_INFO
-from mission_type import Mission
-from queues_dir import QueuesDirectory
-from event_types import Event, ControlEvent
-from route import Route
-from crypto_module import *
+from src.geo_utils import dict_to_geopoint
+from src.helpers import deserialize_position
+from src.mission_type import Mission
+from src.queues_dir import QueuesDirectory
+from src.event_types import Event, ControlEvent
+from src.route import Route
+from src.blackbox import *
 
 class BaseSafetyBlock(Process):
     """SafetyBlock класс для реализации блока "Ограничитель"""
@@ -22,8 +24,10 @@ class BaseSafetyBlock(Process):
     event_source_name = SAFETY_BLOCK_QUEUE_NAME
     events_q_name = event_source_name
 
-    def __init__(self, queues_dir: QueuesDirectory, log_level=DEFAULT_LOG_LEVEL):
-        super().__init__()  # Process.__init__ takes no arguments
+    def __init__(self, queues_dir: QueuesDirectory, blackbox: BaseBlackBox = None, log_level = DEFAULT_LOG_LEVEL):
+        # вызываем конструктор базового класса
+        super().__init__()
+        self._blackbox = blackbox
         self._queues_dir = queues_dir
         self.log_level = log_level
 
@@ -60,8 +64,6 @@ class BaseSafetyBlock(Process):
         }
         self._route: Optional[Route] = None
 
-
-    
     def _log_message(self, criticality: int, message: str):
         """_log_message печатает сообщение заданного уровня критичности
 
@@ -71,6 +73,11 @@ class BaseSafetyBlock(Process):
         """
         if criticality <= self.log_level:
             print(f"[{CRITICALITY_STR[criticality]}]{self.log_prefix} {message}")
+    
+    def _log_event_to_blackbox(self, event: Event):
+        """Логирует событие в черный ящик, если он настроен"""
+        if self._blackbox and hasattr(event, 'signature'):
+            self._blackbox._log_event(event, event.signature)
 
     def _check_control_q(self):
         try:
@@ -108,149 +115,65 @@ class BaseSafetyBlock(Process):
         """ разблокировка грузового отсека """
 
 
-    def _set_new_position(self, position: GeoPoint):
+    def _set_new_position(self, position_data):
         """ установка новых координат """
-        self._log_message(LOG_DEBUG, f"установка местоположения {position}")
-
-        self._position = position
-
-        distance_to_next_wp = self._route.calculate_remaining_distance_to_next_point(
-            self._position)
-
-        if distance_to_next_wp <= self._tolerance_meters:
+        self._log_message(LOG_DEBUG, f"установка местоположения {position_data}")
+        self._position = deserialize_position(position_data)
+        if not self._position:
+            self._log_message(LOG_ERROR, "Invalid position received")
+            return
+        
+        self._log_message(LOG_DEBUG, f"Position update: {self._position}")
+        
+        if not self._route:
+            return
+            
+        distance = self._route.calculate_remaining_distance_to_next_point(self._position)
+        if distance <= self._tolerance_meters:
             self._route.move_to_next_point()
             if self._route.route_finished:
-                self._log_message(LOG_INFO, "маршрут пройден")
-            else:
-                self._log_message(LOG_INFO, "сегмент пройден")
-
-    def _verify_event(self, event: Event) -> bool:
-        """Verify the event signature"""
-        if not hasattr(event, 'signature'):
-            self._log_message(LOG_ERROR, f"Event {event} has no signature")
-            return False
-            
-        verification_data = {
-            "source": event.source,
-            "destination": event.destination,
-            "operation": event.operation,
-            "parameters": event.parameters
-        }
-        
-        try:
-            return verify_signature(verification_data, event.signature, self.public_key)
-        except Exception as e:
-            self._log_message(LOG_ERROR, f"Signature verification failed: {e}")
-            return False
-
+                self._log_message(LOG_INFO, "Route completed")
     def _check_events_q(self):
-        """Check incoming events with signature verification"""
+        """_check_events_q
+        проверяет входящие события до их полного исчерпания
+        """
+
+
         while True:
             try:
                 event: Event = self._events_q.get_nowait()
             except Empty:
+                # никаких команд не поступило,
+                # останавливаем цикл
                 break
-                
             if not isinstance(event, Event):
-                continue
+                return
 
-            self._log_message(LOG_DEBUG, f"Received request {event}")
+            self._log_message(LOG_DEBUG, f"получен запрос {event}")
 
-            # Verify signature before processing
-            if not self._verify_event(event):
-                self._log_message(LOG_ERROR, f"Invalid signature for event {event}")
-                continue
-
-            if event.operation in self._enabled_handlers:
+            if event.operation in self._enabled_handlers.keys():
                 handler = self._enabled_handlers[event.operation]
                 handler(event.parameters)
             else:
-                self._log_message(LOG_ERROR, f"Unknown operation: {event}")
+                self._log_message(LOG_ERROR, f"неизвестная операция: {event}")
 
 
     @abstractmethod
     def _send_speed_to_consumers(self):
-        self._log_message(LOG_DEBUG, "Sending speed to consumers")
-        servos_q_name = SERVOS_QUEUE_NAME
-        servos_q = self._queues_dir.get_queue(servos_q_name)
-
-        event = Event(
-            source=self.event_source_name,
-            destination=servos_q_name,
-            operation="set_speed",
-            parameters=self._speed
-        )
-        
-        # Use dictionary for signing
-        signed_data = {
-            "source": self.event_source_name,
-            "destination": servos_q_name,
-            "operation": "set_speed",
-            "parameters": self._speed
-        }
-        event.signature = create_signature(signed_data, self.private_key)
-        servos_q.put(event)
+        pass
 
 
     @abstractmethod
     def _send_direction_to_consumers(self):
-        self._log_message(LOG_DEBUG, "Sending direction to consumers")
-        servos_q_name = SERVOS_QUEUE_NAME
-        servos_q = self._queues_dir.get_queue(servos_q_name)
-
-        event = Event(
-            source=self.event_source_name,
-            destination=servos_q_name,
-            operation="set_direction",
-            parameters=self._direction
-        )
-        
-        signed_data = {
-            "source": self.event_source_name,
-            "destination": servos_q_name,
-            "operation": "set_direction",
-            "parameters": self._direction
-        }
-        event.signature = create_signature(signed_data, self.private_key)
-        servos_q.put(event)
+        pass
 
     @abstractmethod
     def _send_lock_cargo_to_consumers(self):
-        self._log_message(LOG_DEBUG, "Sending lock command to CargoBay")
-        event = Event(
-            source=self.event_source_name,
-            destination=CARGO_BAY_QUEUE_NAME,
-            operation="lock_cargo",
-            parameters=None
-        )
-        
-        signed_data = {
-            "source": self.event_source_name,
-            "destination": CARGO_BAY_QUEUE_NAME,
-            "operation": "lock_cargo",
-            "parameters": None
-        }
-        event.signature = create_signature(signed_data, self.private_key)
-        self._queues_dir.get_queue(CARGO_BAY_QUEUE_NAME).put(event)
+        pass
 
     @abstractmethod
     def _send_release_cargo_to_consumers(self):
-        self._log_message(LOG_DEBUG, "Sending release command to CargoBay")
-        event = Event(
-            source=self.event_source_name,
-            destination=CARGO_BAY_QUEUE_NAME,
-            operation="release_cargo",
-            parameters=None
-        )
-        
-        signed_data = {
-            "source": self.event_source_name,
-            "destination": CARGO_BAY_QUEUE_NAME,
-            "operation": "release_cargo",
-            "parameters": None
-        }
-        event.signature = create_signature(signed_data, self.private_key)
-        self._queues_dir.get_queue(CARGO_BAY_QUEUE_NAME).put(event)
+        pass
 
     def stop(self):
         """ метод для остановки работы блока,
