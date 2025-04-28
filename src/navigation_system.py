@@ -19,9 +19,12 @@ class BaseNavigationSystem(Process):
     event_source_name = NAVIGATION_QUEUE_NAME
     events_q_name = event_source_name
 
-    def __init__(self, queues_dir: QueuesDirectory, log_level=DEFAULT_LOG_LEVEL):
+    def __init__(self, queues_dir: QueuesDirectory, log_level=DEFAULT_LOG_LEVEL, public_key: str = None, private_key: str = None):
         # вызываем конструктор базового класса
         super().__init__()
+        
+        self.public_key = public_key
+        self.private_key = private_key
 
         self._queues_dir = queues_dir
 
@@ -97,7 +100,7 @@ class BaseNavigationSystem(Process):
             self._log_message(LOG_ERROR, f"ошибка получения координат: {e}")
 
     @abstractmethod
-    def _send_position_to_consumers(self,):
+    def _send_position_to_consumers(self):
         pass
 
     def run(self):

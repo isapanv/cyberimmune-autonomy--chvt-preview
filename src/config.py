@@ -10,6 +10,7 @@ SITL_TELEMETRY_QUEUE_NAME = "sitl.mqtt"
 MISSION_SENDER_QUEUE_NAME = "planner.mqtt"
 SAFETY_BLOCK_QUEUE_NAME = "safety"
 SECURITY_MONITOR_QUEUE_NAME = "security"
+BLACK_BOX_QUEUE_NAME = "blackbox"
 
 DEFAULT_LOG_LEVEL = 2  # 1 - errors, 2 - verbose, 3 - debug
 LOG_FAILURE = 0

@@ -10,13 +10,11 @@ from geopy import Point as GeoPoint
 
 from src.config import CRITICALITY_STR, DEFAULT_LOG_LEVEL, SAFETY_BLOCK_QUEUE_NAME, \
     LOG_ERROR, LOG_DEBUG, LOG_INFO
-from src.geo_utils import dict_to_geopoint
-from src.helpers import deserialize_position
 from src.mission_type import Mission
 from src.queues_dir import QueuesDirectory
 from src.event_types import Event, ControlEvent
 from src.route import Route
-from src.blackbox import *
+
 
 class BaseSafetyBlock(Process):
     """SafetyBlock класс для реализации блока "Ограничитель"""
@@ -24,12 +22,14 @@ class BaseSafetyBlock(Process):
     event_source_name = SAFETY_BLOCK_QUEUE_NAME
     events_q_name = event_source_name
 
-    def __init__(self, queues_dir: QueuesDirectory, blackbox: BaseBlackBox = None, log_level = DEFAULT_LOG_LEVEL):
+    def __init__(self, queues_dir: QueuesDirectory, log_level = DEFAULT_LOG_LEVEL, public_key: str = None, private_key: str = None):
         # вызываем конструктор базового класса
         super().__init__()
-        self._blackbox = blackbox
+        
+        self.public_key = public_key
+        self.private_key = private_key
+
         self._queues_dir = queues_dir
-        self.log_level = log_level
 
         # создаём очередь для сообщений на обработку
         self._events_q = Queue()
@@ -73,11 +73,6 @@ class BaseSafetyBlock(Process):
         """
         if criticality <= self.log_level:
             print(f"[{CRITICALITY_STR[criticality]}]{self.log_prefix} {message}")
-    
-    def _log_event_to_blackbox(self, event: Event):
-        """Логирует событие в черный ящик, если он настроен"""
-        if self._blackbox and hasattr(event, 'signature'):
-            self._blackbox._log_event(event, event.signature)
 
     def _check_control_q(self):
         try:
@@ -115,24 +110,22 @@ class BaseSafetyBlock(Process):
         """ разблокировка грузового отсека """
 
 
-    def _set_new_position(self, position_data):
+    def _set_new_position(self, position: GeoPoint):
         """ установка новых координат """
-        self._log_message(LOG_DEBUG, f"установка местоположения {position_data}")
-        self._position = deserialize_position(position_data)
-        if not self._position:
-            self._log_message(LOG_ERROR, "Invalid position received")
-            return
-        
-        self._log_message(LOG_DEBUG, f"Position update: {self._position}")
-        
-        if not self._route:
-            return
-            
-        distance = self._route.calculate_remaining_distance_to_next_point(self._position)
-        if distance <= self._tolerance_meters:
+        self._log_message(LOG_DEBUG, f"установка местоположения {position}")
+
+        self._position = position
+
+        distance_to_next_wp = self._route.calculate_remaining_distance_to_next_point(
+            self._position)
+
+        if distance_to_next_wp <= self._tolerance_meters:
             self._route.move_to_next_point()
             if self._route.route_finished:
-                self._log_message(LOG_INFO, "Route completed")
+                self._log_message(LOG_INFO, "маршрут пройден")
+            else:
+                self._log_message(LOG_INFO, "сегмент пройден")
+
     def _check_events_q(self):
         """_check_events_q
         проверяет входящие события до их полного исчерпания

@@ -23,9 +23,12 @@ class BaseCommunicationGateway(Process):
     event_source_name = COMMUNICATION_GATEWAY_QUEUE_NAME
     events_q_name = event_source_name    
 
-    def __init__(self, queues_dir: QueuesDirectory, log_level = DEFAULT_LOG_LEVEL):
+    def __init__(self, queues_dir: QueuesDirectory, log_level = DEFAULT_LOG_LEVEL, public_key: str = None, private_key: str = None):
         # вызываем конструктор базового класса
         super().__init__()
+        
+        self.private_key = private_key
+        self.public_key = public_key
 
         # запоминаем каталог очередей -
         # позже он понадобится для отправки маршрутного задания в систему управления

@@ -26,9 +26,13 @@ class BaseControlSystem(Process):
     event_source_name = CONTROL_SYSTEM_QUEUE_NAME
     events_q_name = event_source_name
 
-    def __init__(self, queues_dir: QueuesDirectory, log_level=DEFAULT_LOG_LEVEL):
+    def __init__(self, queues_dir: QueuesDirectory, log_level=DEFAULT_LOG_LEVEL, public_key: str = None, private_key: str = None):
         # вызываем конструктор базового класса
         super().__init__()
+        
+        self.public_key = public_key
+        self.private_key = private_key
+        
         self._queues_dir = queues_dir
 
         # создаём очередь для сообщений на обработку

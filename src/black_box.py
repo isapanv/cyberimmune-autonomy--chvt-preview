@@ -1,48 +1,42 @@
-""" модуль монитора безопасности """
 from abc import abstractmethod
-from multiprocessing import Queue, Process
 from queue import Empty
 
 from time import sleep
 
-from src.config import LOG_ERROR, SECURITY_MONITOR_QUEUE_NAME,\
-    CRITICALITY_STR, DEFAULT_LOG_LEVEL, \
-    LOG_DEBUG, LOG_INFO
-from src.queues_dir import QueuesDirectory
+from multiprocessing import Queue, Process
+from typing import Any
+
 from src.event_types import Event, ControlEvent
+from src.config import *
 
-
-class BaseSecurityMonitor(Process):
+class BaseBlackBox(Process):
+    """Базовый класс для черного ящика, обеспечивающего безопасное хранение журналов"""
     """ класс монитора безопасности """
     log_prefix = "[SECURITY]"
-    event_source_name = SECURITY_MONITOR_QUEUE_NAME
+    event_source_name = BLACK_BOX_QUEUE_NAME
     events_q_name = event_source_name
     log_level = DEFAULT_LOG_LEVEL
 
-    def __init__(self, queues_dir: QueuesDirectory):
-        # вызываем конструктор базового класса
+    def __init__(self):
         super().__init__()
-
-        self._queues_dir = queues_dir
-
-        # создаём очередь для сообщений на обработку
-        self._events_q = Queue()
-        self._events_q_name = self.event_source_name
-
-        # регистрируем очередь в каталоге
-        self._queues_dir.register(
-            queue=self._events_q, name=self._events_q_name)
-
+        
         # инициализируем интервал обновления
-        self._recalc_interval_sec = 0.1
-
+        self._control_q = Queue()        
+        self._recalc_interval_sec = 0.5
         self._quit = False
-        # очередь управляющих команд (например, для остановки работы модуля)
-        self._control_q = Queue()
 
-        self._security_policies = {}
+    @abstractmethod
+    def _log_event(self, event: Event, signature: str) -> bool:
+        """Абстрактный метод для логирования события с проверкой подписи
 
-        self._log_message(LOG_INFO, "создан монитор безопасности")
+        Args:
+            event: событие для логирования
+            signature: цифровая подпись события
+
+        Returns:
+            bool: True если подпись верна и событие записано, иначе False
+        """
+        pass
 
     def _log_message(self, criticality: int, message: str):
         """_log_message печатает сообщение заданного уровня критичности
@@ -53,6 +47,10 @@ class BaseSecurityMonitor(Process):
         """
         if criticality <= self.log_level:
             print(f"[{CRITICALITY_STR[criticality]}]{self.log_prefix} {message}")
+
+    def stop(self):
+        """Остановка процесса черного ящика"""
+        self._quit = True
 
     def _check_control_q(self):
         """_check_control_q проверка наличия новых управляющих команд
@@ -66,7 +64,7 @@ class BaseSecurityMonitor(Process):
         except Empty:
             # никаких команд не поступило, ну и ладно
             pass
-
+        
     def _check_events_q(self):
         """_check_events_q в цикле проверим все входящие сообщения,
         выход из цикла по условию отсутствия новых сообщений
@@ -85,31 +83,12 @@ class BaseSecurityMonitor(Process):
 
             self._log_message(LOG_DEBUG, f"получен запрос {event}")
 
-            if self._check_event(event):
-                self._proceed(event)
-
-    @abstractmethod
-    def _check_event(self, event: Event):
-        """ проверка события на допустимость политиками безопасности """
-
-    def _proceed(self, event: Event):
-        """ отправить проверенное событие конечному получателю """
-        destination_q = self._queues_dir.get_queue(event.destination)
-        if destination_q is None:
-            self._log_message(
-                LOG_ERROR, f"ошибка обработки запроса {event}, получатель не найден")
-        else:
-            destination_q.put(event)
-            self._log_message(
-                LOG_DEBUG, f"запрос отправлен получателю {event}")
-
-    def stop(self):
-        """stop запрос остановки работы блока
-        """
-        self._control_q.put(ControlEvent(operation='stop'))
+            if event.operation == 'log_event':
+                self._log_message(LOG_INFO, "логируем ивент")
+                self._log_event(event=event.parameters)
 
     def run(self):
-        self._log_message(LOG_INFO, "старт блока грузового отсека")
+        self._log_message(LOG_INFO, "старт блока логгера")
 
         while self._quit is False:
             sleep(self._recalc_interval_sec)
