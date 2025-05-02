@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from asyncio.log import logger
 from queue import Empty
 
 from time import sleep
@@ -77,15 +78,19 @@ class BaseBlackBox(Process):
                 # в очереди не команд на обработку,
                 # выходим из цикла проверки
                 break
+            
             if not isinstance(event, Event):
                 # событие неправильного типа, пропускаем
+                logger.warning(f"⚠️ Dropped non-Event object from queue: {event}")
                 continue
-
+            if not event.source or not event.destination or not event.operation:
+                print("[ОШИБКА][BLACKBOX] отсутствуют обязательные поля")
+                return False
             self._log_message(LOG_DEBUG, f"получен запрос {event}")
 
             if event.operation == 'log_event':
                 self._log_message(LOG_INFO, "логируем ивент")
-                self._log_event(event=event.parameters)
+                self._log_event(event=event)
 
     def run(self):
         self._log_message(LOG_INFO, "старт блока логгера")

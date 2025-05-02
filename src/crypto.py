@@ -122,6 +122,9 @@ def verify_signature(obj: Any, signature: str, public_key_pem: str) -> bool:
         return False
 
 def verify_event_signature(event: Event, public_key_pem: str) -> bool:
+    if not event.signature:
+        return False
+    
     event_without_signature = Event(
         source=event.source,
         destination=event.destination,

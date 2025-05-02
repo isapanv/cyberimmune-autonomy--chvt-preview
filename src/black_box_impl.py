@@ -44,9 +44,15 @@ class BlackBox(BaseBlackBox):
             'event': event,
             'valid': is_valid
         }
+            
+        if event.source == None or  event.destination== None or event.operation== None:
+            print("[ОШИБКА][BLACKBOX] отсутствуют обязательные поля")
+            is_valid = False
 
         if not is_valid:
             log_entry['error'] = 'Invalid signature'
+            log_entry['valid'] = is_valid
+
 
         with open(self.storage_path, 'a') as f:
             f.write(serialize(log_entry).decode("utf-8") + "\n")
