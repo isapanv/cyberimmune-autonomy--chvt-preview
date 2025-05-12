@@ -40,21 +40,12 @@ class BlackBox(BaseBlackBox):
         # Проверяем подпись
         is_valid = verify_event_signature(event, self.public_key)
 
-        log_entry = {
-            'event': event,
-            'valid': is_valid
-        }
-            
-        if event.source == None or  event.destination== None or event.operation== None:
-            print("[ОШИБКА][BLACKBOX] отсутствуют обязательные поля")
-            is_valid = False
-
         if not is_valid:
-            log_entry['error'] = 'Invalid signature'
-            log_entry['valid'] = is_valid
+            return False
 
+        log_entry = event
 
         with open(self.storage_path, 'a') as f:
             f.write(serialize(log_entry).decode("utf-8") + "\n")
 
-        return is_valid
+        return True
