@@ -6,8 +6,12 @@ from time import sleep
 from multiprocessing import Queue, Process
 from typing import Any
 
+from src.queues_dir import QueuesDirectory
 from src.event_types import Event, ControlEvent
 from src.config import *
+
+from pathlib import Path
+from src.crypto import verify_signature, verify_event_signature, serialize
 
 class BaseBlackBox(Process):
     """Базовый класс для черного ящика, обеспечивающего безопасное хранение журналов"""
@@ -24,6 +28,13 @@ class BaseBlackBox(Process):
         self._control_q = Queue()        
         self._recalc_interval_sec = 0.5
         self._quit = False
+        
+        self.public_key: str = None
+
+        # создаём очередь для сообщений на обработку
+        self._events_q = Queue()
+
+        
 
     @abstractmethod
     def _log_event(self, event: Event, signature: str) -> bool:
@@ -36,6 +47,10 @@ class BaseBlackBox(Process):
         Returns:
             bool: True если подпись верна и событие записано, иначе False
         """
+        pass
+    
+    @abstractmethod
+    def _log_message_impl(self, message: str):
         pass
 
     def _log_message(self, criticality: int, message: str):
@@ -82,10 +97,19 @@ class BaseBlackBox(Process):
                 continue
 
             self._log_message(LOG_DEBUG, f"получен запрос {event}")
+            
+            if not event.signature:
+                continue
+                
+            is_valid = verify_event_signature(event, self.public_key)
+
+            if not is_valid:
+                continue
 
             if event.operation == 'log_event':
-                self._log_message(LOG_INFO, "логируем ивент")
                 self._log_event(event=event.parameters)
+            elif event.operation == 'log_message':
+                self._log_message_impl(message=event.signature + ' ' + event.parameters)
 
     def run(self):
         self._log_message(LOG_INFO, "старт блока логгера")
